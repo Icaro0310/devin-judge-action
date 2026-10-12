@@ -1,0 +1,99 @@
+name: devin-judge action gate
+description: >-
+  Run the poordjaevin advisory risk gate on an action description: a
+  calibrated local judge answers concrete safety checks (moves money,
+  deletes data) and the job fails on a "block" verdict. Read/verify
+  only: it scores text, never mutates anything. Fails closed — a backend
+  error is a block, not a pass. Part of the devin-* ecosystem.
+author: Icaro0310
+branding:
+  icon: law
+  color: purple
+inputs:
+  action:
+    description: "The action text to gate (e.g. a step description, a PR intent). Mutually exclusive with action-file."
+    required: false
+    default: ""
+  action-file:
+    description: "Read the action text from a file in the workspace"
+    required: false
+    default: ""
+  calibrator:
+    description: "Path to a calibration.json from 'poordjaevin calibrate' (default: raw confidence when absent)"
+    required: false
+    default: "calibration.json"
+  backend:
+    description: "Scoring backend: 'nli' (offline local model, needs the [local] extra) or 'acp' (Devin ACP session, self-hosted runners only)"
+    required: false
+    default: "nli"
+  version:
+    description: "pip specifier for the poordjaevin package — keep the [local] extra for the nli backend"
+    required: false
+    default: "poordjaevin[local]>=0.1.2,<0.2"
+outputs:
+  verdict:
+    description: "The gate verdict — 'allow' or 'block, require explicit confirmation'"
+    value: ${{ steps.gate.outputs.verdict }}
+  block:
+    description: "'true' when the gate blocked the action"
+    value: ${{ steps.gate.outputs.block }}
+  triggered:
+    description: JSON object of the triggered risk checks with their scores
+    value: ${{ steps.gate.outputs.triggered }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: "3.12"
+    - name: Install poordjaevin
+      shell: bash
+      run: pip install "${{ inputs.version }}"
+    - name: Gate action
+      id: gate
+      shell: bash
+      env:
+        ACTION_TEXT: ${{ inputs.action }}
+        ACTION_FILE: ${{ inputs.action-file }}
+        CALIBRATOR: ${{ inputs.calibrator }}
+        POORDJAEVIN_BACKEND: ${{ inputs.backend }}
+      run: |
+        if [ -z "$ACTION_TEXT" ] && [ -z "$ACTION_FILE" ]; then
+          echo "::error::nothing to gate — pass 'action' (text) or 'action-file' (path). A violated precondition, not a block."
+          echo "verdict=block, require explicit confirmation" >> "$GITHUB_OUTPUT"
+          echo "block=true" >> "$GITHUB_OUTPUT"
+          echo "triggered={}" >> "$GITHUB_OUTPUT"
+          exit 2
+        fi
+        args=(gate --calibrator "$CALIBRATOR")
+        [ -n "$ACTION_FILE" ] && args+=(--action-file "$ACTION_FILE")
+        [ -z "$ACTION_FILE" ] && args+=(--action "$ACTION_TEXT")
+        set +e
+        poordjaevin "${args[@]}" > .judge-gate.json
+        rc=$?
+        set -e
+        if [ "$rc" -eq 2 ] || [ ! -s .judge-gate.json ]; then
+          echo "::error::poordjaevin could not run the gate (exit $rc) — usage/io error. A violated precondition, not a verdict."
+          echo "verdict=block, require explicit confirmation" >> "$GITHUB_OUTPUT"
+          echo "block=true" >> "$GITHUB_OUTPUT"
+          echo "triggered={}" >> "$GITHUB_OUTPUT"
+          exit 2
+        fi
+        python3 - <<'PY'
+        import json, os
+        d = json.load(open(".judge-gate.json"))
+        verdict = d.get("verdict", "block, require explicit confirmation")
+        block = "true" if d.get("block") else "false"
+        triggered = json.dumps(d.get("triggered", {}))
+        out = open(os.environ["GITHUB_OUTPUT"], "a")
+        out.write(f"verdict={verdict}\nblock={block}\ntriggered={triggered}\n")
+        for name, score in d.get("triggered", {}).items():
+            print(f"::warning::triggered check: {name} (score {score})")
+        if "error" in d:
+            print(f"::error::poordjaevin backend error ({d.get('error')}): {d.get('detail','')}")
+        print(f"::notice::poordjaevin gate: {verdict}")
+        PY
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::devin-judge gate: BLOCK — the action requires explicit confirmation (see triggered checks above). A backend error also lands here: the gate fails closed."
+          exit 1
+        fi
