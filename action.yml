@@ -83,7 +83,9 @@ runs:
         import json, os
         d = json.load(open(".judge-gate.json"))
         verdict = d.get("verdict", "block, require explicit confirmation")
-        block = "true" if d.get("block") else "false"
+        # the CLI's error payload carries a block verdict but no "block"
+        # key — derive from the verdict too so outputs stay consistent
+        block = "true" if (d.get("block") or str(verdict).startswith("block")) else "false"
         triggered = json.dumps(d.get("triggered", {}))
         out = open(os.environ["GITHUB_OUTPUT"], "a")
         out.write(f"verdict={verdict}\nblock={block}\ntriggered={triggered}\n")
