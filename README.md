@@ -64,6 +64,13 @@ exit:
 - outputs: `verdict`, `block` (`true`/`false`), `triggered` (JSON map of
   the triggered checks and their scores/`ABSTAIN`).
 
+## Platform support
+
+Runs on any GitHub-hosted runner with the default `nli` backend
+(offline model, ~400MB on first run). The `acp` backend needs a
+self-hosted runner with Devin credentials. Python 3.12 comes from
+`actions/setup-python`.
+
 ## Notes
 
 - The `nli` backend needs the `local` extra (torch + transformers); the
