@@ -26,6 +26,14 @@ inputs:
     description: "Scoring backend: 'nli' (offline local model, needs the [local] extra) or 'acp' (Devin ACP session, self-hosted runners only)"
     required: false
     default: "nli"
+  checks-file:
+    description: "Path to a JSON file {name: hypothesis} of domain-specific gate checks (needs poordjaevin >= 0.1.4)"
+    required: false
+    default: ""
+  checks-preset:
+    description: "Named check preset (e.g. 'merge' — protected_main, runtime_destructive, degraded_coverage, sensitive_surface; needs poordjaevin >= 0.1.4)"
+    required: false
+    default: ""
   version:
     description: "pip specifier for the poordjaevin package — keep the [local] extra for the nli backend"
     required: false
@@ -56,6 +64,8 @@ runs:
         ACTION_TEXT: ${{ inputs.action }}
         ACTION_FILE: ${{ inputs.action-file }}
         CALIBRATOR: ${{ inputs.calibrator }}
+        CHECKS_FILE: ${{ inputs.checks-file }}
+        CHECKS_PRESET: ${{ inputs.checks-preset }}
         POORDJAEVIN_BACKEND: ${{ inputs.backend }}
       run: |
         if [ -z "$ACTION_TEXT" ] && [ -z "$ACTION_FILE" ]; then
@@ -66,6 +76,8 @@ runs:
           exit 2
         fi
         args=(gate --calibrator "$CALIBRATOR")
+        [ -n "$CHECKS_FILE" ] && args+=(--checks-file "$CHECKS_FILE")
+        [ -n "$CHECKS_PRESET" ] && args+=(--checks-preset "$CHECKS_PRESET")
         [ -n "$ACTION_FILE" ] && args+=(--action-file "$ACTION_FILE")
         [ -z "$ACTION_FILE" ] && args+=(--action "$ACTION_TEXT")
         set +e
