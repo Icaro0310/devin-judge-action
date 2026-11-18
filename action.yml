@@ -65,8 +65,17 @@ runs:
       shell: bash
       run: |
         set -e
-        python3 -m venv "$RUNNER_TEMP/judge-venv"
-        echo "$RUNNER_TEMP/judge-venv/bin" >> "$GITHUB_PATH"
+        # Persistent venv: the [local] extra pulls torch, and a per-job
+        # venv would reinstall it every run. Small runners also OOM on
+        # torch's default linux wheels (multi-GB CUDA bundle) — the nli
+        # backend only needs CPU, so pre-seed the CPU build and let the
+        # Install step resolve torch as already satisfied.
+        VENV="${XDG_DATA_HOME:-$HOME/.local/share}/devin-judge-venv"
+        [ -x "$VENV/bin/pip" ] || python3 -m venv "$VENV"
+        echo "$VENV/bin" >> "$GITHUB_PATH"
+        "$VENV/bin/pip" show torch >/dev/null 2>&1 || \
+          "$VENV/bin/pip" install \
+            --extra-index-url https://download.pytorch.org/whl/cpu torch
     - name: Install poordjaevin
       shell: bash
       run: pip install "${{ inputs.version }}"
